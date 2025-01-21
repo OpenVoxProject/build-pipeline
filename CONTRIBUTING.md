@@ -1,68 +1,49 @@
-# Community Packaging
+# OpenVox Packaging
 
-Every bit used except for the Overlook InfraTech private key is available in public repos in the `overlookinfra` github org.
-You'll notice it currently has a lot of `overlookinfra` nomenclature in here, but these will be changed to `OpenPuppet`
-as soon as we've come to a firm naming decision.
+Every bit used except for the Vox Pupuli OpenVox private key is available in public repos in the `OpenVoxProject` Github org.
 
-## `puppet-agent`
+Building off of [the work Jeff Clark did to improve Docker support in Vanagon](https://github.com/ospuppet/vanagon), we [added a bunch more things](https://github.com/openvoxproject/vanagon/commit/f439446bfc885bde34da8d3b32f28ab1f72bd6d3) (and more since!) to make building these packages with containers work better. The choice of container images for each platform can be found in the [platform default files](https://github.com/OpenVoxProject/vanagon/tree/main/lib/vanagon/platform/defaults). We also tried to standardize the platform defaults a bit since they've gotten rather divergent over the years. Using containerized builds also allows us to build for different architectures without having to build on a system of that particular architecture.
 
-Building off of [the work Jeff Clark did to improve Docker support in Vanagon](https://github.com/ospuppet/vanagon),
-we [added a bunch more things](https://github.com/overlookinfra/vanagon/commit/f439446bfc885bde34da8d3b32f28ab1f72bd6d3)
-to make building these packages with containers work better. You can see the choices of container images for each platform there.
-We also tried to standardize the platform defaults a bit since they've gotten rather divergent over the years.
-This also allows us to build for different architectures.
-The packages are built all of this on [@nmburgan](https://github.com/nmburgan)'s Ryzen 5 5950X, and aarch64 and ppc64le were run under emulation with qemu.
+Generally, you will be able to build all packages locally yourself by using Rake tasks, or a GitHub action set up for this purpose.
 
-In some cases, Perforce uses their own internal version of build tools (pl-build-tools) to build for older platforms
-who ship with build tools that are tool old.  Rather than do this, we've moved utilizing publicly available updated
-tools instead. These days, that seems to be mostly for el7.
-.
-In each of the component repos ([puppet-runtime](https://github.com/overlookinfra/puppet-runtime),
-[pxp-agent-vanagon](https://github.com/overlookinfra/pxp-agent-vanagon), [puppet-agent](https://github.com/overlookinfra/puppet-agent)),
-you'll see we have a `plumbing` branch, which is used for syncing the branches from `puppetlabs exactly` as they are.
-The packaging code for each project is also going into this branch.
+## `openvox-agent`
 
-Each has an `overlookinfra.patch` which changes some of the component files in order to make them work correctly with
-containerized building with our vanagon changes.
+In some cases, Perforce uses their own internal version of build tools (pl-build-tools) to build for older platforms that ship with build tools that are too old.  Rather than do this, we've moved to utilizing publicly available updated tools instead. These days, that seems to be mostly for el7.
 
-* **Rake tasks**
-  * `Tag` - This checks out the given puppetlabs tag we want to build for, then applies the overlookinfra.patch, and then retags
-      in the form `<puppetlabs tag>-overlookinfra`.  It pushes a branch with a name of the form `overlookinfra/<puppetlabs tag>` that
-      contains the commit that is tagged.  In pxp-agent-vanagon and puppet-agent, this also overwrites the `component json` file
-      to point to the [OSL puppet-artifacts S3 bucket](https://artifacts.overlookinfratech.com).
-  * `Build` - This utilizes the `build-vanagon.rb` script which is also found in the `plumbing` branch.
-      This is a pretty hacky script, but what it does is create directories for however many platforms you want to build in parallel,
-      and then run those builds in the container for each platform.  You can certainly do 1 single thread to do one platform at a time.
-      On my 32 hardware thread/32GB RAM system, 8 threads seems to be pretty reasonable.  All of the packages end up back in this
-      repo in the `output` directory like it would with a normal vanagon build.
-  * `Upload` - This is written specifically for uploading to the OSL S3 buckets.  You won't be able to use this without the
-      secrets, but all the code is there.
+There are three component repos that are required for building the agent.
+* [puppet-runtime](https://github.com/openvoxproject/puppet-runtime) - vanagon repo containing components packaged in the All-In-One (AIO) agent package
+* [pxp-agent-vanagon](https://github.com/openvoxproject/pxp-agent-vanagon) - pxp-agent is primarily used by Puppet Enterprise for orchestration, but some pieces are used by members of the community
+* [openvox-agent](https://github.com/openvoxproject/openvox-agent) - the vanagon repo that creates the rpm/deb packages
 
-First, `puppet-runtime` is built and uploaded to the `puppet-runtime` S3 bucket.  Then `pxp-agent`, which utilizes `puppet-runtime`, then `puppet-agent` which utilizes both.
+Within these repos, you'll find the following rake tasks:
 
-## `puppetserver/puppetdb`
+* `vox:tag['<tag>']` - This tags the repo and pushes the tag to origin.
+* `vox:build['<project>','<platform>']` - This takes a project name (found in `configs/project`) and platform to build for (found in `configs/platforms`) and performs the build using vanagon's `docker` engine. The component will be built inside the container, and files will end up in the `output` directory of your repo clone.
+* `vox:upload['<tag>','<platform>']` - This uploads the artifacts generated by the build to the [OSL openvox-artifacts S3 bucket](https://artifacts.overlookinfratech.com) or potentially a different S3 bucket if desired. You won't be able to use this without the AWS CLI set up with appropriate secrets.
+* `vox:promote_runtime['<puppet-runtime tag>']` - Found in the [pxp-agent-vanagon](https://github.com/OpenVoxProject/pxp-agent-vanagon) repo, this modifies the [puppet-runtime.json](https://github.com/OpenVoxProject/pxp-agent-vanagon/blob/main/configs/components/puppet-runtime.json) file to point to a given tagged puppet-runtime version that exists in the [OSL openvox-artifacts S3 bucket](https://artifacts.overlookinfratech.com). You can modify this file manually to point to a directory on disk by changing `location` to `file:///path/to/puppet-runtime/output`.
+* `vox:promote['<component>','<tag>']` - This more generic task is found in the [openvox-agent repo](https://github.com/OpenVoxProject/openvox-agent/blob/main/tasks/promote.rake) and can be used for promoting tagged builds of both `puppet-runtime` and `pxp-agent`.
 
-This has similar build and upload rake tasks as above.  Right now, we aren't needing to make changes to the repo for our purposes,
-as we can use puppetlabs' ezbake for now, so no tag task.
+First, `puppet-runtime` is built and uploaded to the [puppet-runtime artifacts directory](https://artifacts.overlookinfratech.com/#puppet-runtime/). Then `pxp-agent`, which utilizes `puppet-runtime` and is uploaded to the [pxp-agent artifacts directory](https://artifacts.overlookinfratech.com/#pxp-agent/) is built. Then `openvox-agent`, which utilizes both, is built and uploaded to the [openvox-agent artifacts directory](https://artifacts.overlookinfratech.com/#openvox-agent/). In this last directory, the rpm and deb agent packages are stored, but these are unsigned.
 
-Build uses the `build-ezbake.rb` hacky Ruby script. This creates (or reuses) [an image](https://github.com/overlookinfra/puppetdb/blob/plumbing/Dockerfile)
-that is based on almalinux 9 that has Ruby, Lein, and Java installed. It then builds for all the platforms, since you don't
-actually need to build on the specific platform your are building a package for.
+The process for building the agent is now mostly in GitHub Actions. They share a [`build_vanagon.yml`](https://github.com/OpenVoxProject/shared-actions/blob/main/.github/workflows/build_vanagon.yml) workflow, which contains the full list of platforms that OpenVox currently supports for the agent. An example of how this shared workflow is used can be found in [puppet-runtime](https://github.com/OpenVoxProject/puppet-runtime/blob/main/.github/workflows/build.yml). The shared workflow is able to upload these artifacts to the appropriate S3 bucket locations.
 
-The code used for signing the packages can be found at https://github.com/overlookinfra/misc/tree/main/signing. 
-This uses an alma 9 container to sign RPMs and debian 12 to sign DEBs.  For debs, we use `aptly` for repo creation,
-since creating a deb repo by hand is not so fun.  For the yum repo, it's a lot simpler. 
-We sign with our GPG-KEY-overlook key, and the pub key is available in repos.
+## `openvox-server/openvoxdb`
 
-To create the repository packages (i.e. the rpm files at https://yum.overlookinfratech.com/ to set up the repo on your machine),
-we used the overlook branch of [puppetlabs-release](https://yum.overlookinfratech.com/).  This is modified to point to the OSL
-repos, and includes the pub key which gets placed and imported automatically.
+These are built using our slightly tweaked version of [ezbake](https://github.com/openvoxproject/ezbake), which allows us to change the name of the packages.
+The [openvox-server](https://github.com/openvoxproject/openvox-server) and [openvoxdb](https://github.com/openvoxproject/openvoxdb) repos contain similar rake tasks, but are used slightly differently:
+
+* `vox:tag['<tag>']` - First, this changes the version found in [`project.clj`](https://github.com/OpenVoxProject/openvox-server/blob/0b234826d3df19c760d33460ef0ea1852da01eb4/project.clj#L1) to the tag and commits that change. Then it tags the repo. Then it creates a new commit after the tag that increments the Z part of the version with `-SNAPSHOT`, following the current convention for these repos. Finally, it pushes the branch and the tag to origin.
+* `vox:build['<tag>']` - Because the `vox:tag` task ends up creating a commit after the tag, this checks out the tag you want to build first. Then, it creates a container to do the ezbake build and saves the artifacts to the `output` directory in your repo clone. Note that since these projects are fairly platform-agnostic, all of the packages can be built inside a single container. This container must be rpm-based, as `rpmbuild` is needed by `fpm` to create the rpms, but no special packages are needed to build the debs. At the moment, all platforms to build for are defined in the rake task.
+* `vox:upload['<tag>','<optional platform>']` - This uploads the artifacts generated by the build to the [OSL openvox-artifacts S3 bucket](https://artifacts.overlookinfratech.com) or, potentially, a different S3 bucket if desired. You won't be able to use this without the AWS CLI set up with appropriate secrets.
+
+At the moment, these tasks must be run locally. They will soon be incorporated into GitHub Action workflows.
+
+## Signing packages and creating the repos
+
+To create the repository packages (i.e. the rpm files at https://yum.overlookinfratech.com/ to set up the repo on your machine), [openvox-release](https://github.com/openvoxproject/openvox-release) is used. The packages this generates will place the public key in the right place and import it, and set up the appropriate [apt](https://apt.overlookinfratech.com)/[yum](https://yum.overlookinfratech.com) repo on your machine.
+
+Signing is performed using the [`sign_from_s3.rb`](https://github.com/OpenVoxProject/misc/blob/main/signing/sign_from_s3.rb) script run on @nmburgan 's machine. You won't be able to use this yourself without the private signing key, but you can see the code used. It downloads the unsigned packages from the [OSL openvox-artifacts S3 bucket](https://artifacts.overlookinfratech.com), signs them, then incorporates them into yum and apt repos, which are then later synced to the S3 buckets. The apt repo is currently maintained with the [aptly](https://www.aptly.info/) tool. At some point, we'll move this to a more automated and sustainable workflow.
 
 ### Disclaimer
 
-This is basically all spike code, as we were trying to get something up and going as fast as possible, and a whole lot of copied
-code between repos.  We would love some help in turning this into proper tooling (or perhaps integrating it into existing tooling)
-and creating proper pipelines. We also don't have Windows or MacOS packages built out, as that's a bit of a heavier lift.
-
-For what we have now, it's all built it all on home computers, and you should be able to as well for reproducibility purposes
-except for the upload and signing part, since you'd need secrets for that.
+The build machinery is all very new code, written to get things up and running as fast as possible. While we are fairly confident the packages should work as well as the last Perforce-built open source Puppet packages, we do not yet have the testing infrastructure that Perforce does. We'll be working on this soon!
